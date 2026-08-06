@@ -22,34 +22,45 @@ tools = [{
     },
 }]
 
-messages = [{"role": "user", "content": "BTC 今天有什麼新聞？"}]
+messages = []  # ← 記憶放這裡，跨輪都不清空
 
-response = client.chat.completions.create(
-    model="gpt-4o-mini",
-    messages=messages,
-    tools=tools,
-)
-message = response.choices[0].message
+print("輸入 exit 結束")
+while True:
+    user_input = input("You: ")
+    if user_input.lower() == "exit":
+        break
 
-if message.tool_calls:
-    tool_call = message.tool_calls[0]
-    args = json.loads(tool_call.function.arguments)
-    print(f"[Claude 決定呼叫 search_news，查詢：{args['query']}]")
+    messages.append({"role": "user", "content": user_input})
 
-    result = tavily.search(args["query"])
-
-    messages.append(message)
-    messages.append({
-        "role": "tool",
-        "tool_call_id": tool_call.id,
-        "content": json.dumps(result, ensure_ascii=False),
-    })
-
-    followup = client.chat.completions.create(
+    response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages,
         tools=tools,
     )
-    print(followup.choices[0].message.content)
-else:
-    print(message.content)
+    message = response.choices[0].message
+
+    if message.tool_calls:
+        tool_call = message.tool_calls[0]
+        args = json.loads(tool_call.function.arguments)
+        print(f"[Claude 決定呼叫 search_news，查詢：{args['query']}]")
+
+        result = tavily.search(args["query"])
+
+        messages.append(message)
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": json.dumps(result, ensure_ascii=False),
+        })
+
+        followup = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            tools=tools,
+        )
+        reply = followup.choices[0].message
+        print(reply.content)
+        messages.append(reply)
+    else:
+        print(message.content)
+        messages.append(message)
