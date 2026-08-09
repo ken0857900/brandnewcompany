@@ -2,65 +2,45 @@ import json
 from dotenv import load_dotenv
 from openai import OpenAI
 from tavily import TavilyClient
+from typing import TypedDict
+from langgraph.graph import StateGraph, START, END
+from datetime import datetime
 
 load_dotenv()
 client = OpenAI()
 tavily = TavilyClient()
 
-tools = [{
-    "type": "function",
-    "function": {
-        "name": "search_news",
-        "description": "Search the web for current news and information.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "The search query"}
-            },
-            "required": ["query"],
-        },
-    },
-}]
+class State(TypedDict):
+    question: str
+    news: str
+    answer: str
 
-messages = []  # ← 記憶放這裡，跨輪都不清空
+def search(state: State) -> dict:
+    result = tavily.search(state["question"])
+    return {"news": json.dumps(result, ensure_ascii=False)}
+
+def answer(state: State) -> dict:
+    today = datetime.now().strftime("%Y-%m-%d")
+    reply = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": f"今天是 {today}。根據這些搜尋結果回答「{state['question']}」：\n{state['news']}"}],
+    )
+    return {"answer": reply.choices[0].message.content}
+
+graph = StateGraph(State)
+graph.add_node("search", search)
+graph.add_node("answer", answer)
+graph.add_edge(START, "search")
+graph.add_edge("search", "answer")
+graph.add_edge("answer", END)
+app = graph.compile()
 
 print("輸入 exit 結束")
 while True:
-    user_input = input("You: ")
-    if user_input.lower() == "exit":
+    q = input("You: ")
+    if q.lower() == "exit":
         break
+    result = app.invoke({"question": q})
+    print(result["answer"])
 
-    messages.append({"role": "user", "content": user_input})
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        tools=tools,
-    )
-    message = response.choices[0].message
-
-    if message.tool_calls:
-        tool_call = message.tool_calls[0]
-        args = json.loads(tool_call.function.arguments)
-        print(f"[Claude 決定呼叫 search_news，查詢：{args['query']}]")
-
-        result = tavily.search(args["query"])
-
-        messages.append(message)
-        messages.append({
-            "role": "tool",
-            "tool_call_id": tool_call.id,
-            "content": json.dumps(result, ensure_ascii=False),
-        })
-
-        followup = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            tools=tools,
-        )
-        reply = followup.choices[0].message
-        print(reply.content)
-        messages.append(reply)
-    else:
-        print(message.content)
-        messages.append(message)
