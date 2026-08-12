@@ -41,6 +41,7 @@ class NewsState(TypedDict):
     question: str
     news: str
     report: str
+    confidence: float
 
 def news_agent(state: NewsState) -> dict:
     reply = client.chat.completions.create(
@@ -57,16 +58,29 @@ def news_agent(state: NewsState) -> dict:
         }],
     )
     report = reply.choices[0].message.content
-    parsed = json.loads(report)  # 自我檢查：格式壞了這裡就直接炸，不會讓壞資料流到下游
+    parsed = json.loads(report)
     assert {"summary", "bullish", "confidence"} <= parsed.keys(), f"News Agent 輸出缺欄位: {parsed}"
-    return {"report": report}
+    return {"report": report, "confidence": parsed["confidence"]}
+
+def writer_node(state: NewsState) -> dict:
+    parsed = json.loads(state["report"])
+    summary = (
+        f"研究報告\n"
+        f"新聞摘要：{parsed['summary']}\n"
+        f"方向：{'看多' if parsed['bullish'] else '看空'}\n"
+        f"信心：{state['confidence']}"
+    )
+    return {"report": summary}
+
 
 news_builder = StateGraph(NewsState)
 news_builder.add_node("search", search)
 news_builder.add_node("news_agent", news_agent)
+news_builder.add_node("writer", writer_node)#前面是函式的名稱，後面是真正執行的函式，前面可以自己訂，後面就是跟你def定義的一樣。
 news_builder.add_edge(START, "search")
 news_builder.add_edge("search", "news_agent")
-news_builder.add_edge("news_agent", END)
+news_builder.add_edge("news_agent", "writer")
+news_builder.add_edge("writer", END)
 news_app = news_builder.compile()
 
 print("輸入 exit 結束；輸入「news 幣種」觸發 News Agent（例：news BTC）")
