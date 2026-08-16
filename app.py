@@ -43,6 +43,29 @@ class NewsState(TypedDict):
     report: str
     confidence: float
 
+class PlannerState(TypedDict):
+    question: str
+    tasks: list[str]
+
+def planner_node(state: PlannerState) -> dict:
+    reply = client.chat.completions.create(
+        model="gpt-4o-mini",
+        response_format={"type": "json_object"},
+        messages=[{
+            "role": "user",
+            "content": (
+                "你是一間 AI 投研公司的 Planner。根據使用者的問題，決定今天要派哪些任務給哪些 agent。"
+                "目前只有一個 agent 可以派：news（查新聞、給多空方向與信心分數）。"
+                "輸出 JSON，欄位固定是 tasks（陣列，元素是要派工的 agent 名稱，目前只會是 [\"news\"] 或 []）。\n"
+                f"使用者問題：{state['question']}"
+            ),
+        }],
+    )
+    parsed = json.loads(reply.choices[0].message.content)
+    assert "tasks" in parsed, f"Planner 輸出缺 tasks 欄位: {parsed}"
+    return {"tasks": parsed["tasks"]}
+
+
 def news_agent(state: NewsState) -> dict:
     reply = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -83,11 +106,16 @@ news_builder.add_edge("news_agent", "writer")
 news_builder.add_edge("writer", END)
 news_app = news_builder.compile()
 
-print("輸入 exit 結束；輸入「news 幣種」觸發 News Agent（例：news BTC）")
+print("輸入 exit 結束；輸入「news 幣種」觸發 News Agent（例：news BTC）； 輸入 「plan」觸發plan條件" )
 while True:
     q = input("You: ")
     if q.lower() == "exit":
         break
+    if q.lower().startswith("plan "):
+        coin = q[5:].strip()
+        result = planner_node({"question": f"{coin} 最新新聞", "tasks": []})
+        print(result["tasks"])
+        continue
     if q.lower().startswith("news "):
         coin = q[5:].strip()
         result = news_app.invoke({"question": f"{coin} 最新新聞"})
@@ -95,5 +123,6 @@ while True:
         continue
     result = app.invoke({"question": q})
     print(result["answer"])
+
 
 
