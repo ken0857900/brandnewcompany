@@ -5,6 +5,7 @@ from tavily import TavilyClient
 from typing import TypedDict
 from langgraph.graph import StateGraph, START, END
 from datetime import datetime
+import requests
 
 load_dotenv()
 client = OpenAI()
@@ -46,6 +47,44 @@ class NewsState(TypedDict):
 class PlannerState(TypedDict):
     question: str
     tasks: list[str]
+
+class MarketState(TypedDict):
+    market_data: str
+    report: str
+    confidence: float
+
+def fetch_market_data(symbol: str) -> str:
+    price = requests.get("https://api.binance.com/api/v3/ticker/price", params={"symbol": symbol}).json()
+    volume = requests.get("https://api.binance.com/api/v3/ticker/24hr", params={"symbol": symbol}).json()
+    funding = requests.get("https://fapi.binance.com/fapi/v1/premiumIndex", params={"symbol": symbol}).json()
+    oi = requests.get("https://fapi.binance.com/fapi/v1/openInterest", params={"symbol": symbol}).json()
+    return json.dumps({
+        "price": price["price"],
+        "volume_24h": volume["volume"],
+        "price_change_24h_pct": volume["priceChangePercent"],
+        "funding_rate": funding["lastFundingRate"],
+        "open_interest": oi["openInterest"],
+    }, ensure_ascii=False)
+
+def market_agent(state: MarketState) -> dict:
+    reply = client.chat.completions.create(
+        model="gpt-4o-mini",
+        response_format={"type": "json_object"},
+        messages=[{
+            "role": "user",
+            "content": (
+                "根據以下市場數據，輸出一個 JSON，欄位固定是："
+                "trend（bullish 或 bearish，判斷多空）、"
+                "evidence（一句話說明依據，需引用至少一項數據）、"
+                "confidence（0 到 1 的信心分數）。\n"
+                f"市場數據：{state['market_data']}"
+            ),
+        }],
+    )
+    report = reply.choices[0].message.content
+    parsed = json.loads(report)
+    assert {"trend", "evidence", "confidence"} <= parsed.keys(), f"Market Agent 輸出缺欄位: {parsed}"
+    return {"report": report, "confidence": parsed["confidence"]}
 
 def planner_node(state: PlannerState) -> dict:
     reply = client.chat.completions.create(
@@ -115,6 +154,12 @@ while True:
         coin = q[5:].strip()
         result = planner_node({"question": f"{coin} 最新新聞", "tasks": []})
         print(result["tasks"])
+        continue
+    if q.lower().startswith("market "):
+        coin = q[7:].strip()
+        data = fetch_market_data(f"{coin}USDT")
+        result = market_agent({"market_data": data, "report": "", "confidence": 0.0})
+        print(result["report"])
         continue
     if q.lower().startswith("news "):
         coin = q[5:].strip()
