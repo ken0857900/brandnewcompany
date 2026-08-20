@@ -9,6 +9,14 @@ model = ChatOpenAI(model="gpt-4o-mini")
 clothing_agent = create_agent(model=model, tools=[], system_prompt="你是服飾文案師，強調版型、材質觸感、穿搭情境。")
 accessory_agent = create_agent(model=model, tools=[], system_prompt="你是配件文案師，強調細節做工、百搭性、送禮情境。")
 beauty_agent = create_agent(model=model, tools=[], system_prompt="你是美妝文案師，強調成分、膚感、使用步驟。")
+other_agent = create_agent(model=model, tools=[], system_prompt="你是通用商品文案師，中性介紹功能與特色，不套用特定產業的語氣詞。")
+
+@tool
+def write_other_copy(product_description: str) -> str:
+    """商品不屬於服飾/配件/美妝時使用，寫中性文案。輸入商品描述文字。"""
+    result = other_agent.invoke({"messages": [{"role": "user", "content": product_description}]})
+    return result["messages"][-1].content
+
 
 @tool
 def write_clothing_copy(product_description: str) -> str:
@@ -30,14 +38,15 @@ def write_beauty_copy(product_description: str) -> str:
 
 router_agent = create_agent(
     model=model,
-    tools=[write_clothing_copy, write_accessory_copy, write_beauty_copy],
-    system_prompt="你是產業分類兼派工員。讀商品描述，判斷屬於服飾、配件、還是美妝，只呼叫對應的那一個工具，不要同時呼叫多個。呼叫完工具後，把工具回傳的內容原封不動貼出來，不要自己再摘要",
+    tools=[write_clothing_copy, write_accessory_copy, write_beauty_copy, write_other_copy],
+    system_prompt="你是產業分類兼派工員。讀商品描述，判斷屬於服飾、配件、美妝，還是都不是（其他），只呼叫對應的那一個工具，不要同時呼叫多個。呼叫完工具後，把工具回傳的內容原封不動貼出來，不要自己再摘要。回答時除了工具的內容外，要先顯示是屬於哪個產業類別的",
 )
 
 products = [
     "亮金色月亮花朵戒指，鑲綠色寶石",
     "碎花雪紡洋裝，夏季輕薄",
     "霧面唇釉，顯色持久",
+    "藍牙喇叭，木質音箱，300ml 保溫杯造型",
 ]
 
 for desc in products:
